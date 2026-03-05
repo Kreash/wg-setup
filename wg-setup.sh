@@ -449,7 +449,7 @@ auto_install() {
     dns="${dns:-1.1.1.1, 1.0.0.1}"
     allowed_ips="${allowed_ips:-0.0.0.0/0}"
 
-    local enable_ipv6="false" srv_ip6=""
+    local enable_ipv6="" srv_ip6=""
     if [[ -n "${ipv6_subnet}" ]]; then
         enable_ipv6="true"
         srv_ip6=$(echo "${ipv6_subnet}" | sed 's/0\/64/1/')
@@ -517,7 +517,7 @@ install_server() {
     local srv_ipv4=$(prompt_input "Server IPv4 subnet" "${DEFAULT_IPV4_SUBNET}")
     local srv_ip=$(echo "${srv_ipv4}" | cut -d'/' -f1 | awk -F. '{print $1"."$2"."$3".1"}')
 
-    local enable_ipv6="false" srv_ipv6="" srv_ip6=""
+    local enable_ipv6="" srv_ipv6="" srv_ip6=""
     if prompt_yes_no "Enable IPv6?"; then
         enable_ipv6="true"
         srv_ipv6=$(prompt_input "Server IPv6 subnet" "${DEFAULT_IPV6_SUBNET}")
