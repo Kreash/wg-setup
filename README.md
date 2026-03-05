@@ -55,16 +55,53 @@ sudo ./wg-setup.sh
 
 ### Commands
 
-| Command               | Description                 |
-| --------------------- | --------------------------- |
-| `install`             | Install WireGuard server    |
-| `add [name] [pubkey]` | Add client (zero-knowledge) |
-| `remove`              | Remove client               |
-| `list`                | List all clients            |
-| `show [name]`         | Show client configuration   |
-| `uninstall`           | Remove WireGuard completely |
-| `version`             | Show version                |
-| `help`                | Show help                   |
+| Command                      | Description                          |
+| ---------------------------- | ------------------------------------ |
+| `install`                    | Install WireGuard server (interactive) |
+| `auto-install [OPTIONS]`     | Install WireGuard server (non-interactive) |
+| `add [name] [pubkey]`        | Add client (zero-knowledge)          |
+| `remove`                     | Remove client                        |
+| `list`                       | List all clients                     |
+| `show [name]`                | Show client configuration            |
+| `uninstall`                  | Remove WireGuard completely          |
+| `version`                    | Show version                         |
+| `help`                       | Show help                            |
+
+### Non-Interactive Install (Ansible / CI)
+
+```bash
+sudo ./wg-setup.sh auto-install \
+  --port 51820 \
+  --subnet "10.66.66.0/24" \
+  --endpoint "212.109.198.162" \
+  --dns "1.1.1.1, 1.0.0.1" \
+  --allowed-ips "0.0.0.0/0"
+```
+
+All options are optional — defaults are applied automatically.
+
+| Option           | Default              | Description                    |
+| ---------------- | -------------------- | ------------------------------ |
+| `--port`         | random (49152-65535) | WireGuard listen port          |
+| `--subnet`       | `10.66.66.0/24`      | Server IPv4 subnet             |
+| `--endpoint`     | auto-detect          | Public IP or hostname          |
+| `--interface`    | auto-detect          | Public network interface       |
+| `--dns`          | `1.1.1.1, 1.0.0.1`  | Client DNS servers             |
+| `--allowed-ips`  | `0.0.0.0/0`         | Client allowed IPs             |
+| `--ipv6-subnet`  | disabled             | Enable IPv6 with given subnet  |
+
+#### Ansible Example
+
+```yaml
+- name: Install WireGuard
+  command: >
+    ./wg-setup.sh auto-install
+    --port 51820
+    --endpoint "{{ ansible_host }}"
+    --dns "1.1.1.1, 1.0.0.1"
+  args:
+    creates: /etc/wireguard/wg0.conf
+```
 
 ### Client Key Generation
 

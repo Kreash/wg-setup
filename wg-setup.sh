@@ -420,6 +420,90 @@ install_wireguard_package() {
     return 0
 }
 
+auto_install() {
+    [[ -e "${WG_CONFIG}" ]] && {
+        log_warning "Already configured. Use: ${SCRIPT_NAME} add"
+        exit 0
+    }
+
+    local port="" subnet="" endpoint="" dns="" allowed_ips="" pub_iface="" ipv6_subnet=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --port)         port="$2"; shift 2 ;;
+            --subnet)       subnet="$2"; shift 2 ;;
+            --endpoint)     endpoint="$2"; shift 2 ;;
+            --interface)    pub_iface="$2"; shift 2 ;;
+            --dns)          dns="$2"; shift 2 ;;
+            --allowed-ips)  allowed_ips="$2"; shift 2 ;;
+            --ipv6-subnet)  ipv6_subnet="$2"; shift 2 ;;
+            *) log_error "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    # Defaults (same as interactive)
+    subnet="${subnet:-${DEFAULT_IPV4_SUBNET}}"
+    port="${port:-$(generate_random_port)}"
+    endpoint="${endpoint:-$(get_public_ip)}"
+    pub_iface="${pub_iface:-$(get_public_interface)}"
+    dns="${dns:-1.1.1.1, 1.0.0.1}"
+    allowed_ips="${allowed_ips:-0.0.0.0/0}"
+
+    local enable_ipv6="false" srv_ip6=""
+    if [[ -n "${ipv6_subnet}" ]]; then
+        enable_ipv6="true"
+        srv_ip6=$(echo "${ipv6_subnet}" | sed 's/0\/64/1/')
+        [[ "${allowed_ips}" == "0.0.0.0/0" ]] && allowed_ips="0.0.0.0/0, ::/0"
+    fi
+
+    local srv_ip=$(echo "${subnet}" | cut -d'/' -f1 | awk -F. '{print $1"."$2"."$3".1"}')
+
+    log_info "Starting auto-install..."
+
+    install_wireguard_package || exit 1
+
+    local priv=$(generate_private_key)
+    local pub=$(generate_public_key "${priv}")
+
+    enable_ip_forwarding "${enable_ipv6}"
+
+    local config="# wg-setup server - $(date +"%Y-%m-%d %H:%M:%S")
+
+[Interface]
+Address = ${srv_ip}/24${enable_ipv6:+, ${srv_ip6}/64}
+ListenPort = ${port}
+PrivateKey = ${priv}
+
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o ${pub_iface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o ${pub_iface} -j MASQUERADE"
+
+    [[ "${enable_ipv6}" == "true" ]] && config+="
+PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o ${pub_iface} -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o ${pub_iface} -j MASQUERADE"
+
+    ensure_directory "${WG_DIR}" "700"
+    write_atomic "${config}" "${WG_CONFIG}" "600"
+
+    local params="SERVER_PUB_IP=\"${endpoint}\"
+SERVER_PUB_NIC=\"${pub_iface}\"
+SERVER_WG_NIC=\"${WG_INTERFACE}\"
+SERVER_WG_IPV4=\"${subnet}\"
+SERVER_PORT=\"${port}\"
+SERVER_PRIV_KEY=\"${priv}\"
+SERVER_PUB_KEY=\"${pub}\"
+CLIENT_DNS=\"${dns}\"
+ALLOWED_IPS=\"${allowed_ips}\""
+
+    [[ "${enable_ipv6}" == "true" ]] && params+="
+SERVER_WG_IPV6=\"${ipv6_subnet}\""
+
+    save_params "${params}"
+    configure_firewall "${port}" "${subnet}" "${WG_INTERFACE}"
+    start_wg "${WG_INTERFACE}"
+
+    log_info "Auto-install complete: ${srv_ip}:${port}"
+}
+
 install_server() {
     show_banner "WireGuard Server Installation"
 
@@ -774,7 +858,8 @@ ${COLOR_YELLOW}USAGE:${COLOR_RESET}
   ${SCRIPT_NAME} [COMMAND] [OPTIONS]
 
 ${COLOR_YELLOW}COMMANDS:${COLOR_RESET}
-  install                  Install WireGuard server
+  install                  Install WireGuard server (interactive)
+  auto-install [OPTIONS]   Install WireGuard server (non-interactive)
   add [name] [pubkey]      Add client (zero-knowledge)
   remove                   Remove client
   list                     List all clients
@@ -783,9 +868,19 @@ ${COLOR_YELLOW}COMMANDS:${COLOR_RESET}
   version                  Show version
   help                     Show this help
 
+${COLOR_YELLOW}AUTO-INSTALL OPTIONS:${COLOR_RESET}
+  --port PORT              WireGuard listen port (default: random)
+  --subnet CIDR            Server subnet (default: ${DEFAULT_IPV4_SUBNET})
+  --endpoint IP            Public IP/hostname (default: auto-detect)
+  --interface NIC          Public network interface (default: auto-detect)
+  --dns SERVERS            Client DNS servers (default: 1.1.1.1, 1.0.0.1)
+  --allowed-ips CIDRS      Client allowed IPs (default: 0.0.0.0/0)
+  --ipv6-subnet CIDR       Enable IPv6 with subnet (default: disabled)
+
 ${COLOR_YELLOW}EXAMPLES:${COLOR_RESET}
   ${SCRIPT_NAME}                           # Interactive mode
   ${SCRIPT_NAME} install                   # Install server
+  ${SCRIPT_NAME} auto-install --port 51820 --endpoint 1.2.3.4
   ${SCRIPT_NAME} add laptop \"Ab3Cd...=\"    # Add with key
   ${SCRIPT_NAME} list                      # List clients
 
@@ -820,6 +915,7 @@ main() {
 
     case "${cmd}" in
         install) install_server ;;
+        auto-install) shift; auto_install "$@" ;;
         add) add_client "${2:-}" "${3:-}" ;;
         remove) remove_client ;;
         list) list_all ;;
